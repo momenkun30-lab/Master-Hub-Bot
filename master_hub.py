@@ -1,112 +1,129 @@
 import telebot
+import pymongo
 from telebot import types
-import json
-import os
+import datetime
+import random
+import string
 
 # --- الإعدادات الأساسية ---
 BOT_TOKEN = "8070560190:AAFjbU4sfFLjS77uE4X_csCG-T71za3eAvg"
 ADMIN_ID = 8305841557
-BASE_URL = "https://phantom-military-v3.onrender.com" # رابط سيرفرك
+MONGO_URI = "mongodb+srv://mfasd94_db_user:UmLYtGDdobe1HGBt@cluster0.ss2d7fa.mongodb.net/?appName=Cluster0"
+
+client = pymongo.MongoClient(MONGO_URI)
+db = client['MasterHub_V3']
+users_col = db['users']
+codes_col = db['promo_codes']
+tools_col = db['tools'] 
+lessons_col = db['lessons']
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- نظام قاعدة البيانات المصغرة ---
-DB_FILE = "database.json"
-def load_db():
-    if not os.path.exists(DB_FILE):
-        data = {"bots": [], "users": [], "vips": []}
-        save_db(data)
-        return data
-    with open(DB_FILE, "r") as f: return json.load(f)
+# --- وظائف الجلب ---
+def get_user(user_id, username="Unknown"):
+    uid = str(user_id)
+    user = users_col.find_one({"user_id": uid})
+    if not user:
+        user = {"user_id": uid, "name": username, "joined_at": str(datetime.date.today()), "rank": "Member", "points": 0}
+        users_col.insert_one(user)
+    return user
 
-def save_db(data):
-    with open(DB_FILE, "w") as f: json.dump(data, f)
-
-# --- لوحة التحكم والواجهة ---
+# --- القائمة الرئيسية ---
 @bot.message_handler(commands=['start'])
 def start(message):
-    db = load_db()
-    if message.chat.id not in db["users"]:
-        db["users"].append(message.chat.id)
-        save_db(db)
-    
+    get_user(message.chat.id, message.from_user.first_name)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("📱 بوتات الأرقام", "💎 أرقام VIP للبيع")
-    markup.add("🛠️ أدوات Termux", "👨‍💻 المطور")
+    markup.add("🛠️ أدوات مجانية", "💎 أدوات بايثون VIP")
+    markup.add("📚 قسم الشروحات", "🎟️ شحن كود")
+    markup.add("👤 ملفي الشخصي")
     if message.chat.id == ADMIN_ID:
-        markup.add("⚙️ لوحة تحكم الآدمن")
+        markup.add("⚙️ لوحة التحكم العليا")
     
-    bot.send_message(message.chat.id, "🚀 **مرحباً بك في بوت الخدمات الشامل**\n\nاختر من القائمة أدناه:", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🚀 **مرحباً بك في نظام Master Hub المطور**\nتم ربط حسابك بالسحاب ✅", reply_markup=markup, parse_mode="Markdown")
 
-# --- إدارة المتجر والبيانات (للمستخدم) ---
-@bot.message_handler(func=lambda m: m.text == "📱 بوتات الأرقام")
-def list_bots(message):
-    db = load_db()
-    if not db["bots"]:
-        bot.send_message(message.chat.id, "⚠️ لا توجد بوتات مضافة حالياً.")
-        return
-    markup = types.InlineKeyboardMarkup()
-    for b in db["bots"]:
-        markup.add(types.InlineKeyboardButton(f"🟢 {b['name']}", url=f"https://t.me/{b['link'].replace('@','')}"))
-    bot.send_message(message.chat.id, "🌐 **قائمة البوتات النشطة:**", reply_markup=markup, parse_mode="Markdown")
+# --- معالجة الأزرار ---
+@bot.message_handler(func=lambda m: True)
+def handle_menu(message):
+    uid = str(message.chat.id)
+    user = get_user(uid)
 
-@bot.message_handler(func=lambda m: m.text == "💎 أرقام VIP للبيع")
-def show_vip(message):
-    db = load_db()
-    if not db["vips"]:
-        bot.send_message(message.chat.id, "✨ المتجر فارغ حالياً.")
-        return
-    text = "💎 **عروض الأرقام المميزة:**\n\n"
-    markup = types.InlineKeyboardMarkup()
-    for item in db["vips"]:
-        text += f"📱 `{item['number']}` ➔ 💰 {item['price']}\n"
-        markup.add(types.InlineKeyboardButton(f"💳 شراء {item['number']}", url=f"https://t.me/{ADMIN_ID}"))
-    bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+    if message.text == "🛠️ أدوات مجانية":
+        tools = list(tools_col.find({"type": "free"}))
+        if not tools: return bot.send_message(uid, "📭 لا توجد أدوات مجانية حالياً.")
+        txt = "🎁 **الأدوات المجانية:**\n"
+        for t in tools: txt += f"\n🔹 {t['name']}\n🔗 {t['link']}\n"
+        bot.send_message(uid, txt)
 
-# --- لوحة تحكم الآدمن (للآدمن فقط) ---
-@bot.message_handler(func=lambda m: m.text == "⚙️ لوحة تحكم الآدمن" and m.chat.id == ADMIN_ID)
-def admin_menu(message):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("➕ أضف بوت", callback_data="add_bot"),
-               types.InlineKeyboardButton("➕ أضف رقم VIP", callback_data="add_vip"))
-    markup.add(types.InlineKeyboardButton("📢 إرسال إعلان", callback_data="broadcast"))
-    markup.add(types.InlineKeyboardButton("🖥️ فتح Phantom Admin", url=f"{BASE_URL}/admin?uid={ADMIN_ID}"))
-    bot.send_message(message.chat.id, "🛠️ **إعدادات المطور:**", reply_markup=markup, parse_mode="Markdown")
+    elif message.text == "💎 أدوات بايثون VIP":
+        if user['rank'] == "VIP":
+            tools = list(tools_col.find({"type": "vip"}))
+            if not tools: return bot.send_message(uid, "📭 لا توجد أدوات VIP حالياً.")
+            txt = "🌟 **أدوات بايثون المدفوعة:**\n"
+            for t in tools: txt += f"\n🔥 {t['name']}\n🔑 الكود/الرابط: `{t['link']}`\n"
+            bot.send_message(uid, txt, parse_mode="Markdown")
+        else:
+            bot.send_message(uid, "⚠️ هذا القسم للمشتركين VIP فقط!")
 
-# --- معالجة الإضافات ---
-@bot.callback_query_handler(func=lambda call: call.data in ["add_bot", "add_vip", "broadcast"])
-def handle_admin_actions(call):
-    if call.data == "add_bot":
-        msg = bot.send_message(ADMIN_ID, "أرسل: (اسم البوت - يوزر_البوت)")
-        bot.register_next_step_handler(msg, save_new_bot)
-    elif call.data == "add_vip":
-        msg = bot.send_message(ADMIN_ID, "أرسل: (الرقم - السعر)")
-        bot.register_next_step_handler(msg, save_new_vip)
-    elif call.data == "broadcast":
-        msg = bot.send_message(ADMIN_ID, "أرسل نص الإعلان للجميع:")
-        bot.register_next_step_handler(msg, do_broadcast)
+    elif message.text == "📚 قسم الشروحات":
+        lessons = list(lessons_col.find())
+        for l in lessons:
+            if l.get('video_id'): bot.send_video(uid, l['video_id'], caption=f"📖 {l['title']}\n\n{l['desc']}")
+            else: bot.send_message(uid, f"📖 {l['title']}\n\n{l['desc']}")
 
-def save_new_bot(message):
+    elif message.text == "👤 ملفي الشخصي":
+        bot.send_message(uid, f"👤 **معلوماتك:**\n🆔: `{uid}`\n💰: {user['points']}\n🎖️: {user['rank']}")
+
+    elif message.text == "🎟️ شحن كود":
+        msg = bot.send_message(uid, "🎟️ أرسل كود الشحن:")
+        bot.register_next_step_handler(msg, process_redeem)
+
+    elif message.text == "⚙️ لوحة التحكم العليا" and message.chat.id == ADMIN_ID:
+        show_admin_panel()
+
+# --- لوحة التحكم ---
+def show_admin_panel():
+    u_count = users_col.count_documents({})
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("➕ أضف أداة", callback_data="adm_add_tool"),
+        types.InlineKeyboardButton("📽️ أضف شرح", callback_data="adm_add_lesson"),
+        types.InlineKeyboardButton("🎁 إنشاء كود", callback_data="adm_gen_code"),
+        types.InlineKeyboardButton("📢 إذاعة للكل", callback_data="adm_broadcast")
+    )
+    bot.send_message(ADMIN_ID, f"📊 **إحصائيات السحاب:**\n👥 مستخدمين: {u_count}\n🌐 الحالة: متصل", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_"))
+def admin_actions(call):
+    if call.data == "adm_add_tool":
+        msg = bot.send_message(ADMIN_ID, "أرسل اسم الأداة ثم نوعها (free/vip) ثم الرابط\nمثال:\n`أداة صيد vip https://link.com`")
+        bot.register_next_step_handler(msg, save_tool)
+    elif call.data == "adm_broadcast":
+        msg = bot.send_message(ADMIN_ID, "أرسل الرسالة التي تريد إرسالها لجميع المستخدمين:")
+        bot.register_next_step_handler(msg, send_broadcast)
+
+def save_tool(message):
     try:
-        db = load_db(); name, link = message.text.split(" - ")
-        db["bots"].append({"name": name, "link": link}); save_db(db)
-        bot.send_message(ADMIN_ID, "✅ تم الحفظ.")
-    except: bot.send_message(ADMIN_ID, "❌ خطأ في التنسيق.")
+        parts = message.text.split()
+        name, t_type, link = parts[0], parts[1], parts[2]
+        tools_col.insert_one({"name": name, "type": t_type.lower(), "link": link})
+        bot.send_message(ADMIN_ID, "✅ تم حفظ الأداة في السحاب!")
+    except: bot.send_message(ADMIN_ID, "❌ خطأ في الصيغة!")
 
-def save_new_vip(message):
-    try:
-        db = load_db(); num, price = message.text.split(" - ")
-        db["vips"].append({"number": num, "price": price}); save_db(db)
-        bot.send_message(ADMIN_ID, "✅ تم إضافة الرقم للمتجر.")
-    except: bot.send_message(ADMIN_ID, "❌ خطأ في التنسيق.")
-
-def do_broadcast(message):
-    db = load_db(); count = 0
-    for user in db["users"]:
-        try: bot.send_message(user, f"📢 **إعلان هام:**\n\n{message.text}", parse_mode="Markdown"); count += 1
+def send_broadcast(message):
+    users = users_col.find()
+    count = 0
+    for u in users:
+        try:
+            bot.send_message(u['user_id'], f"📢 **إعلان من الإدارة:**\n\n{message.text}")
+            count += 1
         except: continue
-    bot.send_message(ADMIN_ID, f"✅ تم الإرسال لـ {count} مستخدم.")
+    bot.send_message(ADMIN_ID, f"✅ تم إرسال الإذاعة لـ {count} مستخدم.")
 
-# تشغيل البوت
-print("Master Bot is Live!")
-bot.polling()
+def process_redeem(message):
+    c = codes_col.find_one_and_update({"code": message.text, "status": "active"}, {"$set": {"status": "used"}})
+    if c:
+        users_col.update_one({"user_id": str(message.chat.id)}, {"$inc": {"points": c['value']}})
+        bot.send_message(message.chat.id, f"✅ تم شحن {c['value']} نقطة!")
+    else: bot.send_message(message.chat.id, "❌ كود غير صالح.")
+
+bot.infinity_polling()
